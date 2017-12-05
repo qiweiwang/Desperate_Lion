@@ -44,7 +44,7 @@ DEL281:
 .macro  DEL89
 DEL89:
                 MOV r1, 44
-              
+
 
 DEL891:
                 SUB r1, r1, 1
@@ -75,8 +75,8 @@ DEL341:
 
 .macro DEL95
 DEL95:
-                MOV r1, 47    
-    
+                MOV r1, 47
+
 
 DEL951:
                 SUB r1, r1, 1
@@ -124,7 +124,7 @@ DEL9S:
 .macro  DEL51
 DEL51:
                 MOV r1, 25
-            
+
 
 DEL511:
                 SUB r1, r1, 1
@@ -142,7 +142,7 @@ DEL221:
 .endm
 
 .macro DEL55
-DEL55: 
+DEL55:
                 MOV r1, 27
 DEL551:
                 SUB r1, r1, 1
@@ -233,7 +233,7 @@ DEL151:		SUB r1, r1, 1
 DEL19:
 		MOV r1, 9
 
-DEL191:	
+DEL191:
 		SUB r1, r1, 1
 		QBNE DEL191, r1, 0
 
@@ -295,21 +295,9 @@ START:
     //Store values from read from the DDR memory into PRU shared RAM
    // SBCO      r0, CONST_PRUSHAREDRAM, 0, 12
 
-
-    // test GP output
-//    MOV r1, 10000000 // loop 10 times
-
-//WAITCMD:
-//    LBCO r3, CONST_PRUSHAREDRAM, 0, 4
-//    QBEQ CORRECT, r3, 2
-
-//    QBEQ ERROR, r3, 3
-//    JMP WAITCMD
-
-
 CORRECT:
    // SET r30.t14
-    
+
 //    STARTDEL
 
     MOV r7, SENDSIZE
@@ -331,7 +319,7 @@ SENDBLANK:
    // DEL100
    // DEL100
 ///////////////////////////////////////////////////////
-    
+
     MOV r20, r20
     MOV r20, r20
 //LED2_OFF
@@ -355,7 +343,7 @@ SENDLOOP:
 
     MOV r1, 1
     SBCO r1, CONST_PRUSHAREDRAM, 0, 4
- 
+
 
 
 
@@ -375,7 +363,7 @@ SENDBLANK2:
     LBCO r3, CONST_PRUSHAREDRAM, 4, 4
     QBNE SENDBLANK2, r3, 2
 ///////////////////////////////////////////////////////
-    
+
    MOV r20, r20
    MOV r20, r20
 
@@ -390,11 +378,11 @@ SENDLOOP2:
  //   DEL10
     ADD r6, r6, 1
     QBNE SENDLOOP2, r6, r20
-    
+
 
     MOV r1, 1
     SBCO r1, CONST_PRUSHAREDRAM, 4, 4
-  
+
     JMP CORRECT
     SBBO r2, r4, 0, 4
 

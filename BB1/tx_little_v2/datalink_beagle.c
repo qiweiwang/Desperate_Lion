@@ -7,13 +7,13 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
-#include <time.h> 
+#include <time.h>
 #include <fcntl.h>
 #include <math.h>
 #include <sys/mman.h>
 
 #include "prussdrv.h"
-#include <pruss_intc_mapping.h>	
+#include <pruss_intc_mapping.h>
 
 
 
@@ -25,7 +25,7 @@
 #define ADDEND3		 0x10210210u
 #define LOADLENGTH       4800
 #define DDR_BASEADDR     0x80000000
-#define OFFSET_DDR	 0x00001008 
+#define OFFSET_DDR	 0x00001008
 #define OFFSET_SHAREDRAM 0		//equivalent with 0x000020
 #define READSIZE	 24000*4800
 #define PRUSS1_SHARED_DATARAM    4
@@ -33,11 +33,14 @@
 #define HEADERSIZE 96
 #define SOCKET_BEACON 5005
 #define DELAY 1000000
+#define FRAG_PAYLOAD_LENGTH 606
+#define FRAG_HEADER_LENGTH 16
+#define THIS_CONE_ID 1
 
 
 
 /*****************************************************************************
- PRU Global Variable Definitions                                               
+ PRU Global Variable Definitions
 *************************************************************************/
 static int mem_fd;
 static void *ddrMem, *sharedMem;
@@ -65,14 +68,14 @@ static unsigned short LOCAL_examplePassed ( unsigned short pruNum );
 
 static int LOCAL_exampleInit (  )
 {
-    void *DDR_regaddr1, *DDR_regaddr2, *DDR_regaddr3;	
+    void *DDR_regaddr1, *DDR_regaddr2, *DDR_regaddr3;
 
     /* open the device */
     mem_fd = open("/dev/mem", O_RDWR|O_SYNC);
     if (mem_fd < 0) {
         printf("Failed to open /dev/mem (%s)\n", strerror(errno));
         return -1;
-    }	
+    }
 
     /* map the DDR memory */
     ddrMem = mmap(0, 0x0FFFFFFF, PROT_WRITE | PROT_READ, MAP_SHARED, mem_fd, DDR_BASEADDR);
@@ -86,7 +89,7 @@ static int LOCAL_exampleInit (  )
     prussdrv_map_prumem(PRUSS0_SHARED_DATARAM, &sharedMem);
     sharedMem_int = (unsigned int*) sharedMem;
 
-    
+
     /* Store Addends in DDR memory location */
     DDR_regaddr1 = ddrMem + OFFSET_DDR;
     DDR_regaddr2 = ddrMem + OFFSET_DDR + 0x00000004;
@@ -113,7 +116,7 @@ static unsigned short LOCAL_examplePassed ( unsigned short pruNum )
     result_2 = sharedMem_int[OFFSET_SHAREDRAM + 2];
 
     return ((result_0 == ADDEND1) & (result_1 ==  ADDEND2) & (result_2 ==  ADDEND3)) ;
-     
+
 }
 
 
@@ -133,7 +136,7 @@ int getLength(unsigned char *lengthC)
 {
     int length = 0;
     unsigned char LenC[4];
-    
+
     LenC[0] = lengthC[1];
     LenC[1] = lengthC[0];
     LenC[2] = 0x00;
@@ -165,7 +168,7 @@ void getChecksum(unsigned char *buf, unsigned char *checksum, int count)
         *(unsigned int*)sum = (*(unsigned int*)(sum)&0x0000ffff) + (*(unsigned int*)(sum)>>16);
     }
 
-    
+
     checksum[0] = ~sum[1];
     checksum[1] = ~sum[0];
 
@@ -179,11 +182,30 @@ void getOpChecksum(unsigned char * buf, unsigned char * checksum, int count)
 }
 
 
+int NEWbyte2bit(unsigned char *byte, unsigned char *bit, int size)
+{
+	int i,j, N_Bits=0;
+
+	for(i=0 ; i<size ; i++)
+	{
+		for(j=0 ; j<8 ; j++)
+		{
+
+				bit[N_Bits] = (byte[i]&0x01)<<6;
+			byte[i] = byte[i]>>1;
+			N_Bits++;
+		}
+	}
+
+	return N_Bits;
+}
+
+
 
 int main()
 {
 
-	//socket variable declaration
+   //socket variable declaration
     struct sockaddr peer, from;
     struct sockaddr myaddr, myaddr2;
     socklen_t peerlen = 0, fromlen=0;
@@ -191,10 +213,13 @@ int main()
     unsigned char msg[2048];
     unsigned char temp[2048];
     unsigned char lengthC[2], srcMAC[6], dstMAC[6], dstIP[4];
-    int length=0;
+    int Nbfrag, fragID, CondID;
+    unsigned char fragment[FRAG_PAYLOAD_LENGTH+18];
+    int length=0, r_length=0;
     int tlen;
-    
-    
+    unsigned char fragment_bit[624*8];
+
+
     //PRU variable declaration
     struct timespec start, end;
     unsigned int ret;
@@ -215,16 +240,19 @@ int main()
     delayTime.tv_sec = 0;
     delayTime.tv_nsec = 100000;
     int counter=0,totalTime=0,delayCounter;
-    
-    
-    
+
+
+
+
+
+
     //*******************PRU initialization********************************//
     //**********************************************************************
-    
+
         printf("\nINFO: Starting %s example.\r\n", "PRU_memAccess_DDR_PRUsharedRAM");
     /* Initialize the PRU */
-    prussdrv_init ();		
-    
+    prussdrv_init ();
+
     /* Open PRU Interrupt */
     ret = prussdrv_open(PRU_EVTOUT_1);
     if (ret)
@@ -232,7 +260,7 @@ int main()
         printf("prussdrv_open open failed\n");
         return (ret);
     }
-    
+
     /* Get the interrupt initialized */
     prussdrv_pruintc_init(&pruss_intc_initdata);
 
@@ -241,7 +269,7 @@ int main()
     /* Initialize example */
     printf("\tINFO: Initializing example.\r\n");
     LOCAL_exampleInit(PRU_NUM);
-    
+
     /* Execute example on PRU */
     printf("\tINFO: Executing example.\r\n");
     int loadOffset=0;
@@ -256,17 +284,17 @@ int main()
     sharedMem_int[9]=0x40004000;
     memcpy(&(sharedMem_int[10+(HEADERSIZE+DATASIZE)/2]),&(sharedMem_int[2]),32);
 
-    
+
     prussdrv_exec_program (PRU_NUM, "./prucode.bin");
     sharedMem_int[0] = 1;
     sharedMem_int[1] = 1;
     printf(" PRU stand by......\n");
-   // ******************************************************************** 
-    
-    
-  
+   // ********************************************************************
 
-    
+
+
+
+
     memset(&myaddr, 0, sizeof(myaddr));
     myaddr.sa_family = AF_INET;
     strcpy(myaddr.sa_data, "eth0");
@@ -283,7 +311,7 @@ int main()
     }
 
 
-    
+
     rc = bind(s, &myaddr, sizeof(struct sockaddr));
     printf("bind rc = %d", rc);
     if(rc<0)
@@ -291,10 +319,10 @@ int main()
         printf("bind call failed\n");
         exit(1);
     }
- 
+
 
     memset(msg, 0x00, 2048);
-    
+
     //PCII eth0
     dstMAC[0] = 0x00;
     dstMAC[1] = 0x23;
@@ -311,25 +339,24 @@ int main()
     srcMAC[4] = 0x49;
     srcMAC[5] = 0x08;
 
+
+
     //PCII eth0 IP 192.168.2.100
     dstIP[0] = 0xc0;
     dstIP[1] = 0xa8;
     dstIP[2] = 0x02;
     dstIP[3] = 0x64;
 
+
+    int lastMem = 1;
     while(1)
     {
         memset(msg, 0x00, 2048);
-	printf("frsafjksfdsfsda\n");
         r = recvfrom(s, msg, 2048, 0, &peer, &peerlen);
         memcpy(lengthC, msg+16, 2);
         length = getLength(lengthC);
 
-        
-        
 
-
-        
         if (r==-1)
             printf("ERROR r = -1\n");
         else
@@ -344,58 +371,67 @@ int main()
             }
         }
         printf("\n");
-        
 
-        memcpy(msg, dstMAC, 6);
-        memcpy(msg+6, srcMAC, 6);
-        memcpy(msg+30, dstIP, 4);
+        r_length = length + 14; //Total length of the packet
+        CondID = THIS_CONE_ID;
+        fragID = 0;
+        Nbfrag = (int)ceil((double)r_length/FRAG_PAYLOAD_LENGTH);
+        while(r_length > 0)
+        {
+            // **************************sharedMem part I preparation ******************************
+            memset(fragment, 0x00, FRAG_PAYLOAD_LENGTH+FRAG_HEADER_LENGTH+2); //2 is for checksum
+            memcpy(fragment, (unsigned char*)&CondID, 4); //Cone ID
+            memcpy(fragment+8, (unsigned char*)&Nbfrag, 4); //Number of fragments
+            fragID++;
+            memcpy(fragment+12, (unsigned char*)&fragID, 4);  //Fragment ID
 
-        //compute  IP checksum
-        msg[24] = 0x00;
-        msg[25] = 0x00;
-        getChecksum(msg+14, msg+24, 10);
 
-        //compute TCP checksum
-        memset(temp, 0x00, 2048);
-        msg[50] = 0x00;
-        msg[51] = 0x00;
+            if(r_length >= FRAG_PAYLOAD_LENGTH)
+            {
+                int frag_payload_length = FRAG_PAYLOAD_LENGTH;
+                memcpy(fragment+4, (unsigned char*)&frag_payload_length, 4); //payload length
+                memcpy(fragment+FRAG_HEADER_LENGTH, msg+FRAG_PAYLOAD_LENGTH*(fragID-1), FRAG_PAYLOAD_LENGTH); //Copy payload
+                getChecksum(fragment, fragment+FRAG_HEADER_LENGTH+FRAG_PAYLOAD_LENGTH, FRAG_HEADER_LENGTH+FRAG_PAYLOAD_LENGTH);  //payload checksum
 
-        memcpy(temp, msg+26, 4);
-        memcpy(temp+4, msg+30, 4);
-        memcpy(temp+9, msg+23, 1);
-        tlen = length-20;
-        temp[10] = ((unsigned char*)(&tlen))[1];
-        temp[11] = ((unsigned char*)(&tlen))[0];         
-
-        memcpy(temp+12, msg+34, tlen);
-        if(tlen&1)
-            getChecksum(temp, msg+50, (tlen+12+1)/2);
-        else
-            getChecksum(temp, msg+50, (tlen+12)/2);
- 
-
-    //send to optical here
-    /*    do{       		  
-
-                        
-			if(sharedMem_int[0]==1)
-			{      
-                    counterS++;
-                    usleep(100);
-	       		//	makeOpticalPacket();                        
-	      			sharedMem_int[0]=2; 
-              		counterR++;
-                    counterJ=0;
+                r_length = r_length-FRAG_PAYLOAD_LENGTH;
             }
- 
-       }while(1);*/
+            else
+            {
+                memcpy(fragment+4, (unsigned char*)&r_length, 4); //payload length
+                memcpy(fragment+FRAG_HEADER_LENGTH, msg+FRAG_PAYLOAD_LENGTH*(fragID-1), r_length); //Copy payload
+                getChecksum(fragment, fragment+FRAG_HEADER_LENGTH+r_length, FRAG_HEADER_LENGTH+r_length);  //payload checksum
+                r_length = 0;
+            }
+
+            NEWbyte2bit(fragment, fragment_bit, 624);
+            if (lastMem == 1)
+            {
+              while(1)
+              {
+                if(sharedMem_int[0]==1) break;
+              }
+              memcpy((unsigned char *)(sharedMem_int+10), fragment_bit, 624*8);
+              sharedMem_int[0]=2;
+              lastMem = 0;
+            }else{
+              while(1)
+              {
+                if(sharedMem_int[1]==1) break;
+              }
+              memcpy((unsigned char *)(sharedMem_int+18)+624*8, fragment_bit, 624*8);
+              sharedMem_int[1]=2;
+              lastMem = 1;
+            }
+
+        }
 
 
-    
-    
-    
-    
-    
+
+
+
+
+
+
 
     }
     close(s);
