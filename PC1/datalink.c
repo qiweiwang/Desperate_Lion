@@ -192,12 +192,12 @@ int main()
         msg[50] = 0x00;
         msg[51] = 0x00;
 
-        memcpy(temp, msg+26, 4);
-        memcpy(temp+4, msg+30, 4);
-        memcpy(temp+9, msg+23, 1);
+        memcpy(temp, msg+26, 4); //source IP
+        memcpy(temp+4, msg+30, 4); //Destination IP
+        memcpy(temp+9, msg+23, 1);  //Protocol
         //memcpy(temp+10, msg+16, 2);
         int tlen;
-        tlen = length-20;
+        tlen = length-20; //TCP length
         temp[10] = ((unsigned char*)(&tlen))[1];
         temp[11] = ((unsigned char*)(&tlen))[0];         
 
